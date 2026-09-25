@@ -41,6 +41,8 @@ type Config struct {
 	RPCURL string
 	// DatabaseURL is a Postgres connection string (pgx format).
 	DatabaseURL string
+	// DatabaseReplicaURL is an optional Postgres connection string for read-only queries.
+	DatabaseReplicaURL string
 	// DatabaseMaxConns is the pgx pool MaxConns. Zero means use the
 	// driver default (DATABASE_MAX_CONNS).
 	DatabaseMaxConns int32
@@ -121,6 +123,7 @@ func Load() (Config, error) {
 		Network:            net,
 		RPCURL:             net.RPCURL,
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		DatabaseReplicaURL: os.Getenv("DATABASE_REPLICA_URL"),
 		PollInterval:       DefaultPollInterval,
 		HTTPAddr:           getenv("HTTP_ADDR", DefaultHTTPAddr),
 		HTTPMaxBodyBytes:   DefaultHTTPMaxBodyBytes,
@@ -319,6 +322,7 @@ const redacted = "[redacted]"
 func (c Config) LogAttrs() []slog.Attr {
 	return []slog.Attr{
 		slog.String("database_url", redactDatabaseURL(c.DatabaseURL)),
+		slog.String("database_replica_url", redactDatabaseURL(c.DatabaseReplicaURL)),
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("source_mode", c.SourceMode),
 		slog.String("poll_interval", c.PollInterval.String()),

@@ -1144,3 +1144,15 @@ func (s *SQLite) AlertCountsByDay(ctx context.Context, days int) ([]AlertDayCoun
 	}
 	return out, rows.Err()
 }
+
+func (s *SQLite) CreateMonitorTemplate(ctx context.Context, t *MonitorTemplate) error { return nil }
+func (s *SQLite) GetMonitorTemplate(ctx context.Context, id int64) (*MonitorTemplate, error) { return nil, nil }
+func (s *SQLite) ListMonitorTemplates(ctx context.Context) ([]MonitorTemplate, error) { return nil, nil }
+func (s *SQLite) UpdateMonitorTemplate(ctx context.Context, t *MonitorTemplate) error { return nil }
+func (s *SQLite) DeleteMonitorTemplate(ctx context.Context, id int64) error { return nil }
+func (s *SQLite) CreateSavedSearch(ctx context.Context, ss *SavedSearch) error { return nil }
+func (s *SQLite) ListSavedSearches(ctx context.Context) ([]SavedSearch, error) { return nil, nil }
+func (s *SQLite) GetSavedSearch(ctx context.Context, id int64) (*SavedSearch, error) { return nil, nil }
+func (s *SQLite) DeleteSavedSearch(ctx context.Context, id int64) error { return nil }
+func (s *SQLite) SetDefaultSearch(ctx context.Context, id int64) error { return nil }
+func (s *SQLite) ClearDefaultSearch(ctx context.Context, id int64) error { return nil }

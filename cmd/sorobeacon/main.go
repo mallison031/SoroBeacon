@@ -82,6 +82,7 @@ func run() error {
 		MinConns:        cfg.DatabaseMinConns,
 		MaxConnLifetime: cfg.DatabaseMaxConnLifetime,
 		MaxConnIdleTime: cfg.DatabaseMaxConnIdleTime,
+		ReplicaURL:      cfg.DatabaseReplicaURL,
 	}, configCipher)
 	if err != nil {
 		return err

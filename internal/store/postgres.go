@@ -20,11 +20,13 @@ type PoolSettings struct {
 	MinConns        int32
 	MaxConnLifetime time.Duration
 	MaxConnIdleTime time.Duration
+	ReplicaURL      string
 }
 
 // Postgres implements Store on top of a pgx connection pool.
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	replica *pgxpool.Pool // optional read replica
 	// cipher encrypts and decrypts channels.config at rest. Nil (the
 	// default) keeps the pre-encryption plaintext behaviour.
 	cipher ConfigCipher
@@ -57,8 +59,37 @@ func NewPostgres(ctx context.Context, databaseURL string, settings PoolSettings)
 		pool.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	return &Postgres{pool: pool}, nil
+
+	var replica *pgxpool.Pool
+	if settings.ReplicaURL != "" {
+		repCfg, err := buildPoolConfig(settings.ReplicaURL, settings)
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("connect postgres replica: %w", err)
+		}
+		replica, err = pgxpool.NewWithConfig(ctx, repCfg)
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("connect postgres replica: %w", err)
+		}
+		if err := replica.Ping(ctx); err != nil {
+			replica.Close()
+			pool.Close()
+			return nil, fmt.Errorf("ping postgres replica: %w", err)
+		}
+	} else {
+		replica = pool // fallback to primary if no replica is defined
+	}
+
+	return &Postgres{pool: pool, replica: replica}, nil
 }
+
+// readPool returns the replica pool (which falls back to primary if unset).
+// Callers must use it only for safe read queries (e.g. analytical queries that tolerate lag).
+func (p *Postgres) readPool() *pgxpool.Pool {
+	return p.replica
+}
+
 
 // buildPoolConfig parses databaseURL and overlays any non-zero pool
 // settings. Zero means "leave the pgx default" so unset env vars do
@@ -192,7 +223,7 @@ func (p *Postgres) ListMonitorsPage(ctx context.Context, f ListFilter) ([]Monito
 		q += ` ORDER BY id DESC`
 	}
 	q += ` LIMIT ` + arg(pageLimit(f.Limit))
-	rows, err := p.pool.Query(ctx, q, args...)
+	rows, err := p.readPool().Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +567,7 @@ func (p *Postgres) ListChannelsPage(ctx context.Context, f ListFilter) ([]Channe
 		q += ` AND id < ` + arg(f.AfterID)
 	}
 	q += ` ORDER BY id DESC LIMIT ` + arg(pageLimit(f.Limit))
-	rows, err := p.pool.Query(ctx, q, args...)
+	rows, err := p.readPool().Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -750,7 +781,7 @@ func (p *Postgres) ListAlerts(ctx context.Context, f AlertFilter) ([]Alert, erro
 	}
 	q += ` LIMIT ` + arg(pageLimit(f.Limit))
 
-	rows, err := p.pool.Query(ctx, q, args...)
+	rows, err := p.readPool().Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +811,7 @@ func (p *Postgres) ListDeliveryAttempts(ctx context.Context, alertID int64, stat
 		args = append(args, status)
 	}
 	q += ` ORDER BY id`
-	rows, err := p.pool.Query(ctx, q, args...)
+	rows, err := p.readPool().Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -817,7 +848,7 @@ func (p *Postgres) SetIngestState(ctx context.Context, s IngestState) error {
 
 func (p *Postgres) GetStats(ctx context.Context) (Stats, error) {
 	var s Stats
-	err := p.pool.QueryRow(ctx, `
+	err := p.readPool().QueryRow(ctx, `
 		SELECT
 			(SELECT count(*) FROM monitors),
 			(SELECT count(*) FROM rules),
@@ -836,7 +867,7 @@ func (p *Postgres) AlertCountsByDay(ctx context.Context, days int) ([]AlertDayCo
 	// zeroes, so a quiet day is an explicit 0 rather than a missing bar.
 	// date_trunc / ::date run on (timestamptz AT TIME ZONE 'UTC') so the
 	// session TimeZone cannot shift a late-UTC event into the next local day.
-	rows, err := p.pool.Query(ctx, `
+	rows, err := p.readPool().Query(ctx, `
 		WITH days AS (
 			SELECT generate_series(
 				((now() AT TIME ZONE 'UTC')::date - ($1::int - 1)),

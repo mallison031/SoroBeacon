@@ -405,6 +405,7 @@ func TestLogAttrsOptInDoesNotDumpWholeStruct(t *testing.T) {
 	}
 	assert.Equal(t, []string{
 		"database_url",
+		"database_replica_url",
 		"http_addr",
 		"source_mode",
 		"poll_interval",
