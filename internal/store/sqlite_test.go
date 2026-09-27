@@ -38,18 +38,22 @@ func newTestSQLite(t *testing.T) conformanceStore {
 func (s *SQLite) resetConformance(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM delivery_attempts;
+		 DELETE FROM audit_log;
+		 DELETE FROM pending_digests;
 		 DELETE FROM alerts;
 		 DELETE FROM monitor_channels;
 		 DELETE FROM rules;
 		 DELETE FROM channels;
 		 DELETE FROM monitors;
+		 DELETE FROM saved_searches;
+		 DELETE FROM monitor_templates;
 		 UPDATE ingest_state SET last_ledger = 0, last_cursor = '' WHERE id = 1`); err != nil {
 		return err
 	}
 	// sqlite_sequence only exists once a table with AUTOINCREMENT has been
 	// written to; before that its absence is not an error.
 	_, _ = s.db.ExecContext(ctx,
-		`DELETE FROM sqlite_sequence WHERE name IN ('monitors','rules','channels','alerts','delivery_attempts')`)
+		`DELETE FROM sqlite_sequence WHERE name IN ('monitors','rules','channels','alerts','delivery_attempts','saved_searches','monitor_templates')`)
 	return nil
 }
 
@@ -83,6 +87,14 @@ func TestSQLiteFilePath(t *testing.T) {
 		{name: "absolute", url: "sqlite:///var/lib/sorobeacon/sorobeacon.db", want: "/var/lib/sorobeacon/sorobeacon.db"},
 		{name: "relative host form", url: "sqlite://relative/path.db", want: "relative/path.db"},
 		{name: "opaque", url: "sqlite:./data/sorobeacon.db", want: "./data/sorobeacon.db"},
+		// Windows paths, asserted on every platform: url.Parse reads the "C:"
+		// as a host with an invalid port and fails, so these went nowhere near
+		// the path extraction below until sqliteWindowsPath caught them. They
+		// are literals rather than t.TempDir() so Linux CI guards them too.
+		{name: "windows drive, backslashes", url: `sqlite://C:\srv\sorobeacon.db`, want: `C:\srv\sorobeacon.db`},
+		{name: "windows drive, forward slashes", url: "sqlite://C:/srv/sorobeacon.db", want: "C:/srv/sorobeacon.db"},
+		{name: "windows drive, no double slash", url: `sqlite:D:\data\sorobeacon.db`, want: `D:\data\sorobeacon.db`},
+		{name: "windows drive, lowercase", url: `sqlite://d:\data\sorobeacon.db`, want: `d:\data\sorobeacon.db`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,8 +179,15 @@ func TestBackendSelection(t *testing.T) {
 	assert.Equal(t, "postgres", BackendName("postgresql://localhost/db"))
 	assert.Equal(t, "sqlite", BackendName("sqlite:///var/lib/sorobeacon/sorobeacon.db"))
 	assert.Equal(t, "unknown", BackendName("mysql://localhost/db"))
+	// A Windows path must still name its backend. Reporting "unknown" here
+	// made a misconfigured-backend error out of a perfectly good DATABASE_URL.
+	assert.Equal(t, "sqlite", BackendName(`sqlite://C:\srv\sorobeacon.db`))
 
 	scheme, err := Scheme("sqlite:///tmp/x.db")
+	require.NoError(t, err)
+	assert.Equal(t, "sqlite", scheme)
+
+	scheme, err = Scheme(`sqlite://C:\srv\sorobeacon.db`)
 	require.NoError(t, err)
 	assert.Equal(t, "sqlite", scheme)
 
